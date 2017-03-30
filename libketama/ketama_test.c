@@ -18,9 +18,10 @@ int main(int argc, char **argv)
   }
 
   ketama_continuum c;
-  ketama_roll( &c, *++argv );
-
-  printf( "%s\n", ketama_error() );
+  if (0 == ketama_roll( &c, *++argv )) {
+    printf("ketama roll fail, reason: %s\n", ketama_error());
+    return -1;
+  }
 
   int i;
   for ( i = 0; i < 1000000; i++ )
