@@ -71,6 +71,7 @@ init_sem_id_tracker() {
     sem_ids = malloc(sizeof(int) * 1024);
 }
 
+// shm is different with sem
 static void
 init_shm_id_tracker() {
     shm_ids = malloc(sizeof(int) * 1024);
@@ -141,6 +142,7 @@ static void
 ketama_sem_lock(int sem_set_id) {
     union semun sem_val;
     sem_val.val = 2;
+    // value 2 is lock
     semctl(sem_set_id, 0, SETVAL, sem_val);
 }
 
@@ -151,6 +153,7 @@ static void
 ketama_sem_unlock(int sem_set_id) {
     union semun sem_val;
     sem_val.val = 1;
+    // value 1 is unlock
     semctl(sem_set_id, 0, SETVAL, sem_val);
 }
 
@@ -269,6 +272,7 @@ read_server_definitions(char *filename, unsigned int *count, unsigned long *memo
     unsigned int numservers = 0;
     unsigned long memtotal = 0;
 
+    // parse file and get server infos
     FILE *fi = fopen(filename, "r");
     while (fi && !feof(fi)) {
         char sline[128] = "";
@@ -281,6 +285,7 @@ read_server_definitions(char *filename, unsigned int *count, unsigned long *memo
         if (strlen(sline) < 2 || sline[0] == '#')
             continue;
 
+        // get server info , contains ip and maxmemory
         serverinfo server = read_server_line(sline);
         if (server.memory > 0 && strlen(server.addr)) {
             slist = (serverinfo *) realloc(slist, sizeof(serverinfo) * (numservers + 1));
@@ -319,6 +324,8 @@ unsigned int
 ketama_hashi(char *inString) {
     unsigned char digest[16];
 
+    // only get lowest four bytes
+    // actually ketama_md5_digest support 16 bytes
     ketama_md5_digest(inString, digest);
     return (unsigned int) ((digest[3] << 24)
                            | (digest[2] << 16)
@@ -380,6 +387,7 @@ ketama_create_continuum(key_t key, char *filename) {
     unsigned long memory;
     serverinfo *slist;
 
+    // get server list
     slist = read_server_definitions(filename, &numservers, &memory);
     /* Check numservers first; if it is zero then there is no error message
      * and we need to set one. */
@@ -401,8 +409,14 @@ ketama_create_continuum(key_t key, char *filename) {
     unsigned int i, k, cont = 0;
 
     for (i = 0; i < numservers; i++) {
+        // the proportion of the memory of this server
         float pct = (float) slist[i].memory / (float) memory;
         unsigned int ks = floorf(pct * 40.0 * (float) numservers);
+        // the sum of ks is '40.0 * numservers'
+        // if every slist[i].memory / memory is integer
+        // so the max num of points is '160 * numservers'
+
+        printf("ks : %u\n", ks);
 #ifdef DEBUG
         int hpct = floorf( pct * 100.0 );
 
@@ -416,6 +430,7 @@ ketama_create_continuum(key_t key, char *filename) {
             unsigned char digest[16];
 
             sprintf(ss, "%s-%d", slist[i].addr, k);
+            printf("ss: %s\n", ss);
             ketama_md5_digest(ss, digest);
 
             /* Use successive 4-bytes from hash as numbers
@@ -437,7 +452,11 @@ ketama_create_continuum(key_t key, char *filename) {
     /* Sorts in ascending order of "point" */
     qsort((void *) &continuum, cont, sizeof(mcs), (compfn) ketama_compare);
 
+    // the range is four byte unsigned integer ..
+    // is there shared memory here ??
+
     /* Add data to shmmem */
+    // that's the only location where shmget is to CREATE
     shmid = shmget(key, MC_SHMSIZE, 0644 | IPC_CREAT);
     track_shm_id(shmid);
 
@@ -448,7 +467,10 @@ ketama_create_continuum(key_t key, char *filename) {
     }
 
     time_t modtime = file_modtime(filename);
+    // set num of points
     int nump = cont;
+    // nump .. modtime .. point infos
+
     memcpy(data, &nump, sizeof(int));
     memcpy(data + 1, &modtime, sizeof(time_t));
     memcpy(data + 1 + sizeof(void *), &continuum, sizeof(mcs) * nump);
@@ -486,11 +508,16 @@ ketama_roll(ketama_continuum *contptr, char *filename) {
 //     setlogmask( LOG_UPTO ( LOG_NOTICE | LOG_ERR | LOG_INFO ) );
 //     openlog( "ketama", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1 );
 
+    // ftok -- create IPC(https://en.wikipedia.org/wiki/Inter-process_communication) identifier from path name
+    // The ftok() function attempts to create a unique key suitable for use with the semget(2)
+    // and shmget(2) functions, given the path of an existing file and a user-selectable id.
     key = ftok(filename, 'R');
     if (key == -1) {
         set_error("Invalid filename specified: %s", filename);
         return 0;
     }
+
+    printf("IPC key: %d\n", key);
 
     *contptr = malloc(sizeof(continuum));
     (*contptr)->numpoints = 0;
@@ -505,6 +532,7 @@ ketama_roll(ketama_continuum *contptr, char *filename) {
         usleep(5);
 
         // if we are waiting for > 1 second, take drastic action:
+        // very dtrastic ...
         if (++sanity > 1000000) {
             usleep(rand() % 50000);
             ketama_sem_unlock(sem_set_id);
@@ -515,12 +543,17 @@ ketama_roll(ketama_continuum *contptr, char *filename) {
     time_t modtime = file_modtime(filename);
     time_t *fmodtime = 0;
     while (!fmodtime || modtime != *fmodtime) {
+        // just read
         shmid = shmget(key, MC_SHMSIZE, 0); // read only attempt.
+        // save shmid to global var: shm_ids
         track_shm_id(shmid);
 
+        // read from shared memory first
+        // if exist, we don't need to invoke ketama_create_continuum
         data = shmat(shmid, (void *) 0, SHM_RDONLY);
 
         if (data == (void *) (-1) || (*contptr)->modtime != 0) {
+            // not lock, just set a mask, not others will wait ...
             ketama_sem_lock(sem_set_id);
 
 //          if ( (*contptr)->modtime == 0 )
@@ -536,6 +569,7 @@ ketama_roll(ketama_continuum *contptr, char *filename) {
 /*          else
                 syslog( LOG_INFO, "ketama_create_continuum() successfully finished.\n" );*/
 
+            // just read
             shmid = shmget(key, MC_SHMSIZE, 0); // read only attempt.
             track_shm_id(shmid);
 

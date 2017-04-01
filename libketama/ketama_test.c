@@ -17,22 +17,30 @@ int main(int argc, char **argv)
 	return 1;
   }
 
+  // ketama_continuum is the most important
+  // struct in ketama ...
+  // ketama support  heterogeneous
   ketama_continuum c;
   if (0 == ketama_roll( &c, *++argv )) {
     printf("ketama roll fail, reason: %s\n", ketama_error());
     return -1;
   }
 
-  int i;
-  for ( i = 0; i < 1000000; i++ )
-  {
-    char k[10];
-    sprintf( k, "%d", i );
-    unsigned int kh = ketama_hashi( k );
-    mcs* m = ketama_get_server( k, c );
+//  ketama_print_continuum(c);
 
-    printf( "%u %u %s\n", kh, m->point, m->ip );
-  }
+//  int i;
+//  for ( i = 0; i < 1000000; i++ )
+//  {
+//    char k[10];
+//    sprintf( k, "%d", i );
+//    unsigned int kh = ketama_hashi( k );
+//    // ketama_get_server will invoke ketama_hashi first
+//    mcs* m = ketama_get_server( k, c );
+//
+//    // how we get m->point ..
+//    printf( "%u %u %s\n", kh, m->point, m->ip );
+//  }
+
   ketama_smoke(c);
   return 0;
 }

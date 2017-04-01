@@ -31,6 +31,7 @@
 
 #include <sys/sem.h>    /* semaphore functions and structs. */
 
+// why use shared memory, but not anonymous
 #define MC_SHMSIZE  524288  // 512KB should be ample.
 
 #ifdef __cplusplus /* If this is a C++ compiler, use C linkage */
